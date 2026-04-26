@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cymatics — Live Voice Visualizer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#07070f;--sur:#0d0d1a;--bd:rgba(255,255,255,0.08);
+  --bd2:rgba(255,255,255,0.15);--txt:#ddddf5;--mu:#55556a;
+  --ac:#a08cff;--ac2:#40e0c0;--f:'Courier New',monospace;
+}
+body{background:var(--bg);color:var(--txt);font-family:var(--f);
+     min-height:100vh;display:flex;flex-direction:column;align-items:center;}
+header{width:100%;max-width:900px;padding:20px 20px 0;display:flex;flex-direction:column;gap:3px;}
+.logo{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--ac);}
+.sub{font-size:10px;color:var(--mu);letter-spacing:.1em;}
+.tabs{display:flex;margin-top:16px;border-bottom:.5px solid var(--bd2);}
+.tab{font-family:var(--f);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+     color:var(--mu);background:none;border:none;border-bottom:2px solid transparent;
+     padding:8px 20px 7px;cursor:pointer;transition:color .2s,border-color .2s;margin-bottom:-.5px;}
+.tab:hover{color:var(--txt);}
+.tab.active{color:var(--ac);border-bottom-color:var(--ac);}
+main{width:100%;max-width:900px;padding:14px 20px 40px;display:flex;flex-direction:column;gap:10px;}
+.page{display:none;flex-direction:column;gap:10px;}
+.page.active{display:flex;}
+canvas{display:block;width:100%;border-radius:4px;border:.5px solid var(--bd);background:var(--bg);}
+.prompt{display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px 0 4px;}
+.prompt p{font-size:10px;color:var(--mu);text-align:center;line-height:1.9;max-width:360px;}
+.ctrls{display:none;flex-wrap:wrap;gap:10px;padding:8px 0 2px;border-top:.5px solid var(--bd);}
+.ctrl{display:flex;flex-direction:column;gap:4px;flex:1;min-width:110px;}
+label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--mu);}
+label b{color:var(--txt);font-weight:normal;}
+select{background:var(--sur);border:.5px solid var(--bd2);color:var(--txt);font-family:var(--f);
+       font-size:11px;padding:5px 7px;border-radius:3px;outline:none;cursor:pointer;}
+input[type=range]{width:100%;accent-color:var(--ac);cursor:pointer;}
+.btns{display:flex;gap:7px;align-items:flex-end;}
+button{font-family:var(--f);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+       background:none;color:var(--txt);border:.5px solid var(--bd2);padding:6px 13px;
+       border-radius:3px;cursor:pointer;transition:background .15s;}
+button:hover{background:rgba(255,255,255,0.05);}
+.mbtn{font-size:12px;padding:9px 26px;border-color:var(--ac);color:var(--ac);}
+.mbtn:hover{background:rgba(160,140,255,0.08);}
+.vu{display:none;align-items:center;gap:9px;padding:3px 0;}
+.vul{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mu);}
+.vut{flex:1;height:2px;background:var(--bd2);border-radius:2px;overflow:hidden;}
+.vub{height:100%;width:0%;background:var(--ac2);border-radius:2px;transition:width .05s;}
+.stats{display:none;flex-wrap:wrap;gap:14px;padding:5px 0 2px;border-top:.5px solid var(--bd);}
+.stat{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--mu);}
+.stat b{color:var(--txt);font-weight:normal;}
+footer{font-size:9px;color:var(--mu);text-align:center;line-height:2;padding:0 20px 30px;letter-spacing:.08em;}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Cymatics</div>
+  <div class="sub">live voice → membrane geometry</div>
+  <div class="tabs">
+    <button class="tab active" data-tab="laser">▪ Laser trace</button>
+    <button class="tab" data-tab="chladni">◆ Chladni figure</button>
+  </div>
+</header>
+<main>
+
+<!-- ── LASER ── -->
+<div class="page active" id="page-laser">
+  <canvas id="lc"></canvas>
+  <div class="prompt" id="lp">
+    <button class="mbtn" id="lbtn">● Enable microphone</button>
+    <p>Simulates a laser pointer attached to a vibrating membrane.<br>Your voice drives the harmonic oscillations in real time.</p>
+  </div>
+  <div class="vu" id="lvu"><span class="vul">Level</span><div class="vut"><div class="vub" id="lvub"></div></div></div>
+  <div class="ctrls" id="lc2">
+    <div class="ctrl"><label>Color</label>
+      <select id="lcol"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option><option value="white">White</option></select></div>
+    <div class="ctrl"><label>Sensitivity <b id="lsv">5</b></label><input type="range" id="lsen" min="1" max="10" value="5"></div>
+    <div class="ctrl"><label>Trail fade <b id="ltv">5</b></label><input type="range" id="ltr" min="1" max="10" value="5"></div>
+    <div class="ctrl"><label>Scale <b id="lscv">5</b></label><input type="range" id="lsc" min="1" max="10" value="5"></div>
+    <div class="btns"><button id="lclr">Clear</button><button id="lpause">Pause</button></div>
+  </div>
+  <div class="stats" id="lst">
+    <span class="stat">Freq <b id="lf">—</b></span>
+    <span class="stat">Amp <b id="la">—</b></span>
+    <span class="stat">Harmonics <b id="lh">—</b></span>
+    <span class="stat">Pattern <b id="lpat">—</b></span>
+  </div>
+</div>
+
+<!-- ── CHLADNI ── -->
+<div class="page" id="page-chladni">
+  <canvas id="cc"></canvas>
+  <div class="prompt" id="cp">
+    <button class="mbtn" id="cbtn">● Enable microphone</button>
+    <p>Sand settles at the nodal lines of a vibrating plate.<br>Patterns form automatically — mic makes them respond to your voice.</p>
+  </div>
+  <div class="vu" id="cvu"><span class="vul">Level</span><div class="vut"><div class="vub" id="cvub"></div></div></div>
+  <div class="ctrls" id="cc2">
+    <div class="ctrl"><label>Shape</label>
+      <select id="cshape"><option value="sq">Square</option><option value="ci">Circle</option></select></div>
+    <div class="ctrl"><label>Particles</label>
+      <select id="cpart"><option value="3000">3 000</option><option value="6000" selected>6 000</option><option value="10000">10 000</option></select></div>
+    <div class="ctrl"><label>Sensitivity <b id="csv">5</b></label><input type="range" id="csen" min="1" max="10" value="5"></div>
+    <div class="ctrl"><label>Damping <b id="cdv">5</b></label><input type="range" id="cdamp" min="1" max="10" value="5"></div>
+    <div class="ctrl"><label>Color</label>
+      <select id="ccol"><option value="sand">Sand</option><option value="white">White</option><option value="cyan">Cyan</option><option value="amber">Amber</option></select></div>
+    <div class="btns"><button id="creset">Reset</button><button id="cpause">Pause</button></div>
+  </div>
+  <div class="stats" id="cst">
+    <span class="stat">Freq <b id="cf">—</b></span>
+    <span class="stat">Mode <b id="cm">—</b></span>
+    <span class="stat">Nodal lines <b id="cn">—</b></span>
+    <span class="stat">Pattern <b id="cpat">idle</b></span>
+  </div>
+</div>
+
+</main>
+<footer>
+  Chladni (1787): sand collects at nodal lines where the plate doesn't move.<br>
+  Laser: voice harmonics drive XY membrane oscillation — Lissajous geometry.<br>
+  Audio is processed entirely in your browser. Nothing is recorded.
+</footer>
+
+<script>
+/* ════════ SHARED AUDIO ════════ */
+let AX, AN, FA, TA, audioOK = false;
+
+async function startMic() {
+  if (audioOK) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true,video:false});
+    AX = new (window.AudioContext||window.webkitAudioContext)();
+    AX.createMediaStreamSource(stream).connect(AN = AX.createAnalyser());
+    AN.fftSize = 2048;
+    AN.smoothingTimeConstant = 0.8;
+    FA = new Uint8Array(AN.frequencyBinCount);
+    TA = new Uint8Array(AN.fftSize);
+    audioOK = true;
+    return true;
+  } catch(e){ return false; }
+}
+
+function audioFrame() {
+  if (!audioOK) return null;
+  AN.getByteFrequencyData(FA);
+  const sr=AX.sampleRate, fft=AN.fftSize;
+  let mx=-Infinity, idx=1;
+  for(let i=2;i<FA.length*.45;i++) if(FA[i]>mx){mx=FA[i];idx=i;}
+  const freq=idx*sr/fft, amp=Math.max(0,mx+140);
+  const bs=sr/fft, wts=[];
+  for(let h=1;h<=8;h++){
+    const b=Math.round(freq*h/bs);
+    if(b>=FA.length) break;
+    wts.push(Math.max(0,FA[b]+140)/140);
+  }
+  let harm=0;
+  for(let h=2;h<=8;h++){const b=Math.round(freq*h/bs);if(b<FA.length&&FA[b]>80)harm++;}
+  return {freq,amp,wts,harm};
+}
+
+function classify(freq,harm,amp){
+  if(amp<10) return 'silence';
+  if(harm<=1) return 'pure tone';
+  if(harm<=3&&freq<200) return 'sustained vowel';
+  if(harm>=5) return 'complex chant';
+  return freq>300?'higher register':'vocal harmonic';
+}
+
+/* ════════ TABS ════════ */
+document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  b.classList.add('active');
+  document.getElementById('page-'+b.dataset.tab).classList.add('active');
+}));
+
+/* ════════════════════════════════
+   LASER TRACE
+════════════════════════════════ */
+(()=>{
+  const cv=document.getElementById('lc'), cx=cv.getContext('2d');
+  const tr=document.createElement('canvas'), tc=tr.getContext('2d');
+  function rsz(){const w=cv.parentElement.clientWidth;cv.width=tr.width=w;cv.height=tr.height=Math.round(w*.55);}
+  rsz(); window.addEventListener('resize',rsz);
+
+  let run=false,pau=false,lx=null,ly=null,ph=0,sx=0,sy=0;
+  const CLR={red:a=>`rgba(255,55,35,${a})`,green:a=>`rgba(40,255,80,${a})`,
+             blue:a=>`rgba(60,130,255,${a})`,white:a=>`rgba(240,240,255,${a})`};
+
+  function draw(){
+    if(!run){requestAnimationFrame(draw);return;}
+    requestAnimationFrame(draw);
+    if(pau) return;
+    const d=audioFrame(); if(!d) return;
+    const W=cv.width,H=cv.height,sens=+document.getElementById('lsen').value;
+    const scl=+document.getElementById('lsc').value,trv=+document.getElementById('ltr').value;
+    const col=document.getElementById('lcol').value;
+    cx.drawImage(tr,0,0);
+    cx.fillStyle=`rgba(7,7,15,${0.01+(trv/10)*.08})`;
+    cx.fillRect(0,0,W,H);
+    const tw=d.wts.reduce((a,b)=>a+b,0)||1;
+    let x=0,y=0;
+    for(let h=1;h<=d.wts.length;h++){
+      const w=d.wts[h-1]/tw,fr=d.freq>0?(d.freq*h)/100:h;
+      x+=w*Math.sin(fr*ph+h*.7); y+=w*Math.cos(fr*ph*(h%2===0?1.01:.99));
+    }
+    const bo=(d.amp/140)*(sens/5),sc=Math.min(W,H)*.32*(scl/5);
+    sx+=(x-sx)*.15; sy+=(y-sy)*.15;
+    const px=W/2+sx*sc*bo, py=H/2+sy*sc*bo;
+    if(d.amp>5){
+      if(lx!==null){
+        const g=cx.createLinearGradient(lx,ly,px,py);
+        g.addColorStop(0,CLR[col](.3)); g.addColorStop(1,CLR[col](1));
+        cx.beginPath();cx.moveTo(lx,ly);cx.lineTo(px,py);
+        cx.strokeStyle=g;cx.lineWidth=1.2+d.amp/80;cx.stroke();
+      }
+      cx.beginPath();cx.arc(px,py,2.5,0,Math.PI*2);cx.fillStyle=CLR[col](1);cx.fill();
+      lx=px;ly=py;
+    } else {lx=null;ly=null;}
+    tc.clearRect(0,0,W,H);tc.drawImage(cv,0,0);
+    ph+=.018;
+    document.getElementById('lvub').style.width=Math.round(Math.min(100,(d.amp/140)*100))+'%';
+    document.getElementById('lf').textContent=d.freq>0?Math.round(d.freq)+' Hz':'—';
+    document.getElementById('la').textContent=d.amp>5?Math.round(d.amp):'—';
+    document.getElementById('lh').textContent=d.harm;
+    document.getElementById('lpat').textContent=classify(d.freq,d.harm,d.amp);
+  }
+  draw();
+
+  document.getElementById('lbtn').addEventListener('click',async()=>{
+    const ok=await startMic();
+    if(!ok){document.getElementById('lbtn').textContent='Mic denied';return;}
+    document.getElementById('lp').style.display='none';
+    document.getElementById('lc2').style.display='flex';
+    document.getElementById('lst').style.display='flex';
+    document.getElementById('lvu').style.display='flex';
+    run=true;
+  });
+  document.getElementById('lclr').addEventListener('click',()=>{
+    tc.clearRect(0,0,tr.width,tr.height);
+    cx.fillStyle='#07070f';cx.fillRect(0,0,cv.width,cv.height);lx=null;ly=null;
+  });
+  document.getElementById('lpause').addEventListener('click',function(){
+    pau=!pau;this.textContent=pau?'Resume':'Pause';if(!pau){lx=null;ly=null;}
+  });
+  document.getElementById('lsen').addEventListener('input',function(){document.getElementById('lsv').textContent=this.value;});
+  document.getElementById('ltr').addEventListener('input',function(){document.getElementById('ltv').textContent=this.value;});
+  document.getElementById('lsc').addEventListener('input',function(){document.getElementById('lscv').textContent=this.value;});
+})();
+
+
+/* ════════════════════════════════
+   CHLADNI FIGURES
+   Z(x,y,m,n) = cos(m·π·x/W)·cos(n·π·y/H) + cos(n·π·x/W)·cos(m·π·y/H)
+   Particles descend gradient of |Z| toward nodal lines (Z=0).
+════════════════════════════════ */
+(()=>{
+  const cv=document.getElementById('cc'), cx=cv.getContext('2d');
+
+  /* size canvas — must happen before spawning particles */
+  function rsz(){
+    const w=cv.parentElement.clientWidth;
+    cv.width=w; cv.height=Math.round(w*.55);
+  }
+  rsz();
+  window.addEventListener('resize',()=>{rsz();spawn();});
+
+  /* particle arrays */
+  let N=6000;
+  let PX,PY,VX,VY;
+
+  function spawn(){
+    N=parseInt(document.getElementById('cpart').value)||6000;
+    PX=new Float32Array(N); PY=new Float32Array(N);
+    VX=new Float32Array(N); VY=new Float32Array(N);
+    const W=cv.width,H=cv.height;
+    const shape=document.getElementById('cshape').value;
+    if(shape==='ci'){
+      const cx2=W/2,cy2=H/2,r=Math.min(W,H)*.43;
+      let i=0;
+      while(i<N){
+        const x=cx2+(Math.random()*2-1)*r;
+        const y=cy2+(Math.random()*2-1)*r;
+        if((x-cx2)**2+(y-cy2)**2<r*r){PX[i]=x;PY[i]=y;i++;}
+      }
+    } else {
+      const pad=10;
+      for(let i=0;i<N;i++){
+        PX[i]=pad+Math.random()*(W-2*pad);
+        PY[i]=pad+Math.random()*(H-2*pad);
+      }
+    }
+  }
+  spawn();
+
+  /* Chladni Z for square plate */
+  function Zsq(x,y,W,H,m,n){
+    const qx=x/W,qy=y/H;
+    return Math.cos(m*Math.PI*qx)*Math.cos(n*Math.PI*qy)
+          +Math.cos(n*Math.PI*qx)*Math.cos(m*Math.PI*qy);
+  }
+
+  /* Chladni Z for circular plate */
+  function Zci(x,y,W,H,m,n){
+    const cx2=W/2,cy2=H/2,r=Math.min(W,H)*.43;
+    const dx=x-cx2,dy=y-cy2,d=Math.sqrt(dx*dx+dy*dy);
+    if(d>r) return null;
+    return Math.cos(n*Math.atan2(dy,dx))*Math.cos(m*Math.PI*d/r);
+  }
+
+  function getZ(x,y,W,H,m,n,shape){
+    return shape==='ci'?Zci(x,y,W,H,m,n):Zsq(x,y,W,H,m,n);
+  }
+
+  /* physics step */
+  function step(m,n,strength,damp,shape){
+    const W=cv.width,H=cv.height,eps=2;
+    const pad=8;
+    for(let i=0;i<N;i++){
+      const z0=getZ(PX[i],PY[i],W,H,m,n,shape);
+      if(z0===null){
+        VX[i]+=(W/2-PX[i])*.003; VY[i]+=(H/2-PY[i])*.003;
+      } else {
+        const zx=getZ(PX[i]+eps,PY[i],W,H,m,n,shape);
+        const zy=getZ(PX[i],PY[i]+eps,W,H,m,n,shape);
+        const gx=zx!==null?(Math.abs(zx)-Math.abs(z0))/eps:0;
+        const gy=zy!==null?(Math.abs(zy)-Math.abs(z0))/eps:0;
+        VX[i]-=gx*strength; VY[i]-=gy*strength;
+        VX[i]+=(Math.random()-.5)*.25*strength;
+        VY[i]+=(Math.random()-.5)*.25*strength;
+      }
+      VX[i]*=damp; VY[i]*=damp;
+      PX[i]+=VX[i]; PY[i]+=VY[i];
+      /* boundary */
+      if(shape==='sq'){
+        if(PX[i]<pad){PX[i]=pad;VX[i]=Math.abs(VX[i])*.3;}
+        if(PX[i]>W-pad){PX[i]=W-pad;VX[i]=-Math.abs(VX[i])*.3;}
+        if(PY[i]<pad){PY[i]=pad;VY[i]=Math.abs(VY[i])*.3;}
+        if(PY[i]>H-pad){PY[i]=H-pad;VY[i]=-Math.abs(VY[i])*.3;}
+      } else {
+        const cx2=W/2,cy2=H/2,r=Math.min(W,H)*.43;
+        const dx=PX[i]-cx2,dy=PY[i]-cy2,d=Math.sqrt(dx*dx+dy*dy);
+        if(d>r-1){
+          const nx=dx/d,ny=dy/d;
+          PX[i]=cx2+nx*(r-1.5); PY[i]=cy2+ny*(r-1.5);
+          const dot=VX[i]*nx+VY[i]*ny;
+          VX[i]=(VX[i]-1.5*dot*nx)*.35;
+          VY[i]=(VY[i]-1.5*dot*ny)*.35;
+        }
+      }
+    }
+  }
+
+  /* render particles */
+  function render(shape,col){
+    const W=cv.width,H=cv.height,pad=8;
+    const SAND={sand:'rgba(220,195,130,0.95)',white:'rgba(225,225,240,0.95)',
+                cyan:'rgba(40,220,200,0.95)',amber:'rgba(240,160,40,0.95)'};
+    cx.fillStyle='#07070f'; cx.fillRect(0,0,W,H);
+    cx.strokeStyle='rgba(255,255,255,0.13)'; cx.lineWidth=.8;
+    if(shape==='ci'){
+      cx.beginPath();cx.arc(W/2,H/2,Math.min(W,H)*.43,0,Math.PI*2);cx.stroke();
+    } else {
+      cx.strokeRect(pad,pad,W-2*pad,H-2*pad);
+    }
+    cx.fillStyle=SAND[col]||SAND.sand;
+    for(let i=0;i<N;i++) cx.fillRect(PX[i]-1,PY[i]-1,2,2);
+  }
+
+  /* mode state */
+  let micOn=false,pau=false,idleT=0,curM=2,curN=3,tgtM=2,tgtN=3;
+
+  function freqToMN(freq){
+    const f=Math.max(80,Math.min(freq,900));
+    return {m:Math.max(1,Math.min(7,Math.round(1+(f-80)/120))),
+            n:Math.max(1,Math.min(7,Math.round(2+(f-80)/90)))};
+  }
+
+  /* main loop — runs always, even before mic */
+  function loop(){
+    requestAnimationFrame(loop);
+    if(pau) return;
+
+    const shape=document.getElementById('cshape').value;
+    const col=document.getElementById('ccol').value;
+    const damp=.84+(+document.getElementById('cdamp').value/10)*.13;
+    const sens=+document.getElementById('csen').value;
+
+    let m,n,strength;
+
+    if(!micOn){
+      idleT+=.005;
+      m=Math.max(1,Math.round(2+1.8*Math.sin(idleT)));
+      n=Math.max(1,Math.round(3+1.8*Math.cos(idleT*.7)));
+      strength=1.0;
+    } else {
+      const d=audioFrame();
+      if(d&&d.amp>8){
+        const mn=freqToMN(d.freq); tgtM=mn.m; tgtN=mn.n;
+        document.getElementById('cvub').style.width=Math.round(Math.min(100,(d.amp/140)*100))+'%';
+        document.getElementById('cf').textContent=Math.round(d.freq)+' Hz';
+        document.getElementById('cm').textContent=`(${tgtM},${tgtN})`;
+        document.getElementById('cn').textContent=tgtM+tgtN;
+        document.getElementById('cpat').textContent=classify(d.freq,d.harm,d.amp);
+        strength=(d.amp/140)*(sens/5)*2.2;
+      } else {
+        idleT+=.003; tgtM=Math.max(1,Math.round(2+1.5*Math.sin(idleT)));
+        tgtN=Math.max(1,Math.round(3+1.5*Math.cos(idleT*.7)));
+        strength=.6;
+        document.getElementById('cpat').textContent='silence — chant!';
+      }
+      curM+=(tgtM-curM)*.03; curN+=(tgtN-curN)*.03;
+      m=Math.max(1,Math.round(curM)); n=Math.max(1,Math.round(curN));
+    }
+
+    step(m,n,strength,damp,shape);
+    render(shape,col);
+  }
+  loop(); /* start immediately */
+
+  document.getElementById('cbtn').addEventListener('click',async()=>{
+    const ok=await startMic();
+    if(!ok){document.getElementById('cbtn').textContent='Mic denied';return;}
+    document.getElementById('cp').style.display='none';
+    document.getElementById('cc2').style.display='flex';
+    document.getElementById('cst').style.display='flex';
+    document.getElementById('cvu').style.display='flex';
+    micOn=true;
+  });
+  document.getElementById('creset').addEventListener('click',spawn);
+  document.getElementById('cpause').addEventListener('click',function(){pau=!pau;this.textContent=pau?'Resume':'Pause';});
+  document.getElementById('cpart').addEventListener('change',spawn);
+  document.getElementById('cshape').addEventListener('change',spawn);
+  document.getElementById('csen').addEventListener('input',function(){document.getElementById('csv').textContent=this.value;});
+  document.getElementById('cdamp').addEventListener('input',function(){document.getElementById('cdv').textContent=this.value;});
+})();
+</script>
+</body>
+</html>
