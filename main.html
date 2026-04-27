@@ -73,18 +73,26 @@ footer{font-size:9px;color:var(--mu);text-align:center;line-height:2;padding:0 2
   <div class="vu" id="lvu"><span class="vul">Level</span><div class="vut"><div class="vub" id="lvub"></div></div></div>
   <div class="ctrls" id="lc2">
     <div class="ctrl"><label>Color</label>
-      <select id="lcol"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option><option value="white">White</option></select></div>
-    <div class="ctrl"><label>Sensitivity <b id="lsv">5</b></label><input type="range" id="lsen" min="1" max="10" value="5"></div>
-    <div class="ctrl"><label>Trail fade <b id="ltv">5</b></label><input type="range" id="ltr" min="1" max="10" value="5"></div>
-    <div class="ctrl"><label>Scale <b id="lscv">5</b></label><input type="range" id="lsc" min="1" max="10" value="5"></div>
+      <select id="lcol">
+        <option value="red">Red laser</option>
+        <option value="green">Green laser</option>
+        <option value="blue">Blue laser</option>
+        <option value="white">White</option>
+      </select>
+    </div>
+    <div class="ctrl"><label>Sensitivity <b id="lsv">5</b></label><input type="range" id="lsen" min="1" max="10" value="5" step="1"></div>
+    <div class="ctrl"><label>Trail fade <b id="ltv">5</b></label><input type="range" id="ltr" min="1" max="10" value="5" step="1"></div>
+    <div class="ctrl"><label>Scale <b id="lscv">5</b></label><input type="range" id="lsc" min="1" max="10" value="5" step="1"></div>
     <div class="btns"><button id="lclr">Clear</button><button id="lpause">Pause</button></div>
   </div>
   <div class="stats" id="lst">
-    <span class="stat">Freq <b id="lf">—</b></span>
-    <span class="stat">Amp <b id="la">—</b></span>
+    <span class="stat">Dominant freq <b id="lf">— Hz</b></span>
+    <span class="stat">Amplitude <b id="la">—</b></span>
     <span class="stat">Harmonics <b id="lh">—</b></span>
-    <span class="stat">Pattern <b id="lpat">—</b></span>
+    <span class="stat">Pattern <b id="lpat">listening…</b></span>
   </div>
+   <button id="analyzebtn" style="display:none;font-family:'Courier New',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:none;color:#a08cff;border:.5px solid rgba(160,140,255,0.4);padding:8px 18px;border-radius:3px;cursor:pointer;align-self:flex-start;">⬡ Analyze chant</button>
+  <div id="report"></div>
 </div>
 
 <!-- ── CHLADNI ── -->
@@ -112,6 +120,8 @@ footer{font-size:9px;color:var(--mu);text-align:center;line-height:2;padding:0 2
     <span class="stat">Nodal lines <b id="cn">—</b></span>
     <span class="stat">Pattern <b id="cpat">idle</b></span>
   </div>
+    <button id="canalyzebtn" style="display:none;font-family:'Courier New',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;background:none;color:#a08cff;border:.5px solid rgba(160,140,255,0.4);padding:8px 18px;border-radius:3px;cursor:pointer;align-self:flex-start;">⬡ Analyze chant</button>
+  <div id="creport"></div>
 </div>
 
 </main>
@@ -140,28 +150,10 @@ async function startMic() {
   } catch(e){ return false; }
 }
 
-function audioFrame() {
-  if (!audioOK) return null;
-  AN.getByteFrequencyData(FA);
-  const sr=AX.sampleRate, fft=AN.fftSize;
-  let mx=-Infinity, idx=1;
-  for(let i=2;i<FA.length*.45;i++) if(FA[i]>mx){mx=FA[i];idx=i;}
-  const freq=idx*sr/fft, amp=Math.max(0,mx+140);
-  const bs=sr/fft, wts=[];
-  for(let h=1;h<=8;h++){
-    const b=Math.round(freq*h/bs);
-    if(b>=FA.length) break;
-    wts.push(Math.max(0,FA[b]+140)/140);
-  }
-  let harm=0;
-  for(let h=2;h<=8;h++){const b=Math.round(freq*h/bs);if(b<FA.length&&FA[b]>80)harm++;}
-  return {freq,amp,wts,harm};
-}
-
 function classify(freq,harm,amp){
   if(amp<10) return 'silence';
   if(harm<=1) return 'pure tone';
-  if(harm<=3&&freq<200) return 'sustained vowel';
+  if(harm<=3&&freq<200) return 'sustained vowel — Om-like';
   if(harm>=5) return 'complex chant';
   return freq>300?'higher register':'vocal harmonic';
 }
@@ -175,89 +167,213 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
 }));
 
 /* ════════════════════════════════
-   LASER TRACE
+   LASER TRACE — logic from first file
+   Uses raw FFT data + harmonic decomposition + smoothed Lissajous XY
 ════════════════════════════════ */
 (()=>{
-  const cv=document.getElementById('lc'), cx=cv.getContext('2d');
-  const tr=document.createElement('canvas'), tc=tr.getContext('2d');
-  function rsz(){const w=cv.parentElement.clientWidth;cv.width=tr.width=w;cv.height=tr.height=Math.round(w*.55);}
-  rsz(); window.addEventListener('resize',rsz);
+  const canvas = document.getElementById('lc');
+  const ctx    = canvas.getContext('2d');
 
-  let run=false,pau=false,lx=null,ly=null,ph=0,sx=0,sy=0;
-  const CLR={red:a=>`rgba(255,55,35,${a})`,green:a=>`rgba(40,255,80,${a})`,
-             blue:a=>`rgba(60,130,255,${a})`,white:a=>`rgba(240,240,255,${a})`};
+  /* trail buffer — exactly as in first file */
+  const trailCv  = document.createElement('canvas');
+  const trailCtx = trailCv.getContext('2d');
 
-  function draw(){
-    if(!run){requestAnimationFrame(draw);return;}
-    requestAnimationFrame(draw);
-    if(pau) return;
-    const d=audioFrame(); if(!d) return;
-    const W=cv.width,H=cv.height,sens=+document.getElementById('lsen').value;
-    const scl=+document.getElementById('lsc').value,trv=+document.getElementById('ltr').value;
-    const col=document.getElementById('lcol').value;
-    cx.drawImage(tr,0,0);
-    cx.fillStyle=`rgba(7,7,15,${0.01+(trv/10)*.08})`;
-    cx.fillRect(0,0,W,H);
-    const tw=d.wts.reduce((a,b)=>a+b,0)||1;
-    let x=0,y=0;
-    for(let h=1;h<=d.wts.length;h++){
-      const w=d.wts[h-1]/tw,fr=d.freq>0?(d.freq*h)/100:h;
-      x+=w*Math.sin(fr*ph+h*.7); y+=w*Math.cos(fr*ph*(h%2===0?1.01:.99));
-    }
-    const bo=(d.amp/140)*(sens/5),sc=Math.min(W,H)*.32*(scl/5);
-    sx+=(x-sx)*.15; sy+=(y-sy)*.15;
-    const px=W/2+sx*sc*bo, py=H/2+sy*sc*bo;
-    if(d.amp>5){
-      if(lx!==null){
-        const g=cx.createLinearGradient(lx,ly,px,py);
-        g.addColorStop(0,CLR[col](.3)); g.addColorStop(1,CLR[col](1));
-        cx.beginPath();cx.moveTo(lx,ly);cx.lineTo(px,py);
-        cx.strokeStyle=g;cx.lineWidth=1.2+d.amp/80;cx.stroke();
-      }
-      cx.beginPath();cx.arc(px,py,2.5,0,Math.PI*2);cx.fillStyle=CLR[col](1);cx.fill();
-      lx=px;ly=py;
-    } else {lx=null;ly=null;}
-    tc.clearRect(0,0,W,H);tc.drawImage(cv,0,0);
-    ph+=.018;
-    document.getElementById('lvub').style.width=Math.round(Math.min(100,(d.amp/140)*100))+'%';
-    document.getElementById('lf').textContent=d.freq>0?Math.round(d.freq)+' Hz':'—';
-    document.getElementById('la').textContent=d.amp>5?Math.round(d.amp):'—';
-    document.getElementById('lh').textContent=d.harm;
-    document.getElementById('lpat').textContent=classify(d.freq,d.harm,d.amp);
+  function resize() {
+    const w = canvas.parentElement.clientWidth;
+    canvas.width = w;
+    canvas.height = Math.round(w * 0.58);
+    syncTrail();
   }
-  draw();
+  function syncTrail() {
+    trailCv.width  = canvas.width;
+    trailCv.height = canvas.height;
+  }
+  resize();
+  window.addEventListener('resize', resize);
 
-  document.getElementById('lbtn').addEventListener('click',async()=>{
-    const ok=await startMic();
-    if(!ok){document.getElementById('lbtn').textContent='Mic denied';return;}
-    document.getElementById('lp').style.display='none';
-    document.getElementById('lc2').style.display='flex';
-    document.getElementById('lst').style.display='flex';
-    document.getElementById('lvu').style.display='flex';
-    run=true;
+  /* state */
+  let run = false, paused = false;
+  let lx = null, ly = null;
+  let phase = 0;
+  let smoothX = 0, smoothY = 0;
+
+  /* laser colour helper — identical to first file */
+  function laserColor(col, alpha) {
+    const map = {
+      red:   `rgba(255,55,35,${alpha})`,
+      green: `rgba(40,255,80,${alpha})`,
+      blue:  `rgba(60,130,255,${alpha})`,
+      white: `rgba(240,240,255,${alpha})`,
+    };
+    return map[col] || map.white;
+  }
+
+  /* FFT helpers — identical to first file */
+  function getDominantFreq(freqData, sampleRate, fftSize) {
+    let max = -Infinity, idx = 1;
+    for (let i = 2; i < freqData.length * 0.45; i++) {
+      if (freqData[i] > max) { max = freqData[i]; idx = i; }
+    }
+    return { freq: idx * sampleRate / fftSize, mag: max };
+  }
+
+  function countHarmonics(freqData, fundamental, sampleRate, fftSize) {
+    let count = 0;
+    const binSize = sampleRate / fftSize;
+    for (let h = 2; h <= 8; h++) {
+      const bin = Math.round(fundamental * h / binSize);
+      if (bin < freqData.length && freqData[bin] > 80) count++;
+    }
+    return count;
+  }
+
+  /* position computation — identical to first file */
+  function getPos(freqData, sampleRate, fftSize, sensitivity, scale) {
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+    const sc = Math.min(W, H) * 0.32 * (scale / 5);
+
+    const { freq, mag } = getDominantFreq(freqData, sampleRate, fftSize);
+    const amp = Math.max(0, mag + 140);
+    const binSize = sampleRate / fftSize;
+
+    const harmonicWeights = [];
+    for (let h = 1; h <= 8; h++) {
+      const bin = Math.round(freq * h / binSize);
+      if (bin >= freqData.length) break;
+      const w = Math.max(0, freqData[bin] + 140) / 140;
+      harmonicWeights.push(w);
+    }
+
+    const totalW = harmonicWeights.reduce((a, b) => a + b, 0) || 1;
+
+    let x = 0, y = 0;
+    for (let h = 1; h <= harmonicWeights.length; h++) {
+      const w = harmonicWeights[h - 1] / totalW;
+      const fr = freq > 0 ? (freq * h) / 100 : h;
+      const phaseShift = h * 0.7;
+      x += w * Math.sin(fr * phase + phaseShift);
+      y += w * Math.cos(fr * phase * (h % 2 === 0 ? 1.01 : 0.99));
+    }
+
+    const boost = (amp / 140) * (sensitivity / 5);
+    smoothX += (x - smoothX) * 0.15;
+    smoothY += (y - smoothY) * 0.15;
+
+    return {
+      x: cx + smoothX * sc * boost,
+      y: cy + smoothY * sc * boost,
+      amp, freq,
+      harmonics: countHarmonics(freqData, freq, sampleRate, fftSize),
+    };
+  }
+
+  /* draw loop — identical to first file */
+  function drawFrame() {
+    if (!run) return;
+    requestAnimationFrame(drawFrame);
+    if (paused) return;
+
+    if (!audioOK) return;
+    AN.getByteFrequencyData(FA);
+    AN.getByteTimeDomainData(TA);
+
+    const sensitivity = parseInt(document.getElementById('lsen').value);
+    const scale       = parseInt(document.getElementById('lsc').value);
+    const trailVal    = parseInt(document.getElementById('ltr').value);
+    const col         = document.getElementById('lcol').value;
+    const fadeAlpha   = 0.01 + (trailVal / 10) * 0.08;
+    const sampleRate  = AX.sampleRate;
+    const fftSize     = AN.fftSize;
+    const W = canvas.width, H = canvas.height;
+
+    /* composite trail + fade */
+    ctx.drawImage(trailCv, 0, 0);
+    ctx.fillStyle = `rgba(8,8,16,${fadeAlpha})`;
+    ctx.fillRect(0, 0, W, H);
+
+    const { x, y, amp, freq, harmonics } = getPos(FA, sampleRate, fftSize, sensitivity, scale);
+
+    if (amp > 5) {
+      if (lx !== null) {
+        const grad = ctx.createLinearGradient(lx, ly, x, y);
+        grad.addColorStop(0, laserColor(col, 0.3));
+        grad.addColorStop(1, laserColor(col, 1));
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.2 + amp / 80;
+        ctx.stroke();
+      }
+      /* dot at laser tip */
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = laserColor(col, 1);
+      ctx.fill();
+      lx = x; ly = y;
+    } else {
+      lx = null; ly = null;
+    }
+
+    /* bake into trail buffer */
+    trailCtx.clearRect(0, 0, W, H);
+    trailCtx.drawImage(canvas, 0, 0);
+
+    phase += 0.018;
+
+    /* VU meter */
+    const vuPct = Math.min(100, (amp / 140) * 100);
+    document.getElementById('lvub').style.width = Math.round(vuPct) + '%';
+
+    /* stats */
+    document.getElementById('lf').textContent   = freq > 0 ? Math.round(freq) + ' Hz' : '— Hz';
+    document.getElementById('la').textContent   = amp > 5 ? Math.round(amp) : '—';
+    document.getElementById('lh').textContent   = harmonics;
+    document.getElementById('lpat').textContent = classify(freq, harmonics, amp);
+  }
+
+  /* clear util — identical to first file */
+  function clearAll() {
+    trailCtx.clearRect(0, 0, trailCv.width, trailCv.height);
+    ctx.fillStyle = 'rgba(8,8,16,1)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    lx = null; ly = null;
+  }
+
+  /* mic start */
+  document.getElementById('lbtn').addEventListener('click', async () => {
+    const ok = await startMic();
+    if (!ok) { document.getElementById('lbtn').textContent = 'Mic access denied — try again'; return; }
+    document.getElementById('lp').style.display   = 'none';
+    document.getElementById('lc2').style.display  = 'flex';
+    document.getElementById('lst').style.display  = 'flex';
+    document.getElementById('lvu').style.display  = 'flex';
+    document.getElementById('analyzebtn').style.display = 'block';
+    run = true;
+    drawFrame();
   });
-  document.getElementById('lclr').addEventListener('click',()=>{
-    tc.clearRect(0,0,tr.width,tr.height);
-    cx.fillStyle='#07070f';cx.fillRect(0,0,cv.width,cv.height);lx=null;ly=null;
+
+  document.getElementById('lclr').addEventListener('click', clearAll);
+  document.getElementById('lpause').addEventListener('click', function () {
+    paused = !paused;
+    this.textContent = paused ? 'Resume' : 'Pause';
+    if (!paused) { lx = null; ly = null; }
   });
-  document.getElementById('lpause').addEventListener('click',function(){
-    pau=!pau;this.textContent=pau?'Resume':'Pause';if(!pau){lx=null;ly=null;}
-  });
-  document.getElementById('lsen').addEventListener('input',function(){document.getElementById('lsv').textContent=this.value;});
-  document.getElementById('ltr').addEventListener('input',function(){document.getElementById('ltv').textContent=this.value;});
-  document.getElementById('lsc').addEventListener('input',function(){document.getElementById('lscv').textContent=this.value;});
+  document.getElementById('lsen').addEventListener('input', function () { document.getElementById('lsv').textContent = this.value; });
+  document.getElementById('ltr').addEventListener('input',  function () { document.getElementById('ltv').textContent = this.value; });
+  document.getElementById('lsc').addEventListener('input',  function () { document.getElementById('lscv').textContent = this.value; });
 })();
 
 
 /* ════════════════════════════════
-   CHLADNI FIGURES
+   CHLADNI FIGURES — unchanged from second file
    Z(x,y,m,n) = cos(m·π·x/W)·cos(n·π·y/H) + cos(n·π·x/W)·cos(m·π·y/H)
    Particles descend gradient of |Z| toward nodal lines (Z=0).
 ════════════════════════════════ */
 (()=>{
   const cv=document.getElementById('cc'), cx=cv.getContext('2d');
 
-  /* size canvas — must happen before spawning particles */
   function rsz(){
     const w=cv.parentElement.clientWidth;
     cv.width=w; cv.height=Math.round(w*.55);
@@ -265,7 +381,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   rsz();
   window.addEventListener('resize',()=>{rsz();spawn();});
 
-  /* particle arrays */
   let N=6000;
   let PX,PY,VX,VY;
 
@@ -293,14 +408,12 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   }
   spawn();
 
-  /* Chladni Z for square plate */
   function Zsq(x,y,W,H,m,n){
     const qx=x/W,qy=y/H;
     return Math.cos(m*Math.PI*qx)*Math.cos(n*Math.PI*qy)
           +Math.cos(n*Math.PI*qx)*Math.cos(m*Math.PI*qy);
   }
 
-  /* Chladni Z for circular plate */
   function Zci(x,y,W,H,m,n){
     const cx2=W/2,cy2=H/2,r=Math.min(W,H)*.43;
     const dx=x-cx2,dy=y-cy2,d=Math.sqrt(dx*dx+dy*dy);
@@ -312,7 +425,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     return shape==='ci'?Zci(x,y,W,H,m,n):Zsq(x,y,W,H,m,n);
   }
 
-  /* physics step */
   function step(m,n,strength,damp,shape){
     const W=cv.width,H=cv.height,eps=2;
     const pad=8;
@@ -331,7 +443,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
       }
       VX[i]*=damp; VY[i]*=damp;
       PX[i]+=VX[i]; PY[i]+=VY[i];
-      /* boundary */
       if(shape==='sq'){
         if(PX[i]<pad){PX[i]=pad;VX[i]=Math.abs(VX[i])*.3;}
         if(PX[i]>W-pad){PX[i]=W-pad;VX[i]=-Math.abs(VX[i])*.3;}
@@ -351,7 +462,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     }
   }
 
-  /* render particles */
   function render(shape,col){
     const W=cv.width,H=cv.height,pad=8;
     const SAND={sand:'rgba(220,195,130,0.95)',white:'rgba(225,225,240,0.95)',
@@ -367,7 +477,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     for(let i=0;i<N;i++) cx.fillRect(PX[i]-1,PY[i]-1,2,2);
   }
 
-  /* mode state */
   let micOn=false,pau=false,idleT=0,curM=2,curN=3,tgtM=2,tgtN=3;
 
   function freqToMN(freq){
@@ -376,7 +485,6 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
             n:Math.max(1,Math.min(7,Math.round(2+(f-80)/90)))};
   }
 
-  /* main loop — runs always, even before mic */
   function loop(){
     requestAnimationFrame(loop);
     if(pau) return;
@@ -394,20 +502,34 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
       n=Math.max(1,Math.round(3+1.8*Math.cos(idleT*.7)));
       strength=1.0;
     } else {
-      const d=audioFrame();
-      if(d&&d.amp>8){
-        const mn=freqToMN(d.freq); tgtM=mn.m; tgtN=mn.n;
-        document.getElementById('cvub').style.width=Math.round(Math.min(100,(d.amp/140)*100))+'%';
-        document.getElementById('cf').textContent=Math.round(d.freq)+' Hz';
-        document.getElementById('cm').textContent=`(${tgtM},${tgtN})`;
-        document.getElementById('cn').textContent=tgtM+tgtN;
-        document.getElementById('cpat').textContent=classify(d.freq,d.harm,d.amp);
-        strength=(d.amp/140)*(sens/5)*2.2;
+      if(audioOK){
+        AN.getByteFrequencyData(FA);
+        const sr=AX.sampleRate, fft=AN.fftSize;
+        let mx=-Infinity, idx=1;
+        for(let i=2;i<FA.length*.45;i++) if(FA[i]>mx){mx=FA[i];idx=i;}
+        const rawFreq=idx*sr/fft, rawAmp=Math.max(0,mx+140);
+        let harm=0;
+        for(let h=2;h<=8;h++){const b=Math.round(rawFreq*h/(sr/fft));if(b<FA.length&&FA[b]>80)harm++;}
+
+        if(rawAmp>8){
+          const mn=freqToMN(rawFreq); tgtM=mn.m; tgtN=mn.n;
+          document.getElementById('cvub').style.width=Math.round(Math.min(100,(rawAmp/140)*100))+'%';
+          document.getElementById('cf').textContent=Math.round(rawFreq)+' Hz';
+          document.getElementById('cm').textContent=`(${tgtM},${tgtN})`;
+          document.getElementById('cn').textContent=tgtM+tgtN;
+          document.getElementById('cpat').textContent=classify(rawFreq,harm,rawAmp);
+          strength=(rawAmp/140)*(sens/5)*2.2;
+        } else {
+          idleT+=.003; tgtM=Math.max(1,Math.round(2+1.5*Math.sin(idleT)));
+          tgtN=Math.max(1,Math.round(3+1.5*Math.cos(idleT*.7)));
+          strength=.6;
+          document.getElementById('cpat').textContent='silence — chant!';
+        }
       } else {
-        idleT+=.003; tgtM=Math.max(1,Math.round(2+1.5*Math.sin(idleT)));
+        idleT+=.003;
+        tgtM=Math.max(1,Math.round(2+1.5*Math.sin(idleT)));
         tgtN=Math.max(1,Math.round(3+1.5*Math.cos(idleT*.7)));
         strength=.6;
-        document.getElementById('cpat').textContent='silence — chant!';
       }
       curM+=(tgtM-curM)*.03; curN+=(tgtN-curN)*.03;
       m=Math.max(1,Math.round(curM)); n=Math.max(1,Math.round(curN));
@@ -416,7 +538,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     step(m,n,strength,damp,shape);
     render(shape,col);
   }
-  loop(); /* start immediately */
+  loop();
 
   document.getElementById('cbtn').addEventListener('click',async()=>{
     const ok=await startMic();
@@ -425,6 +547,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     document.getElementById('cc2').style.display='flex';
     document.getElementById('cst').style.display='flex';
     document.getElementById('cvu').style.display='flex';
+    document.getElementById('canalyzebtn').style.display = 'block';
     micOn=true;
   });
   document.getElementById('creset').addEventListener('click',spawn);
@@ -434,6 +557,110 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   document.getElementById('csen').addEventListener('input',function(){document.getElementById('csv').textContent=this.value;});
   document.getElementById('cdamp').addEventListener('input',function(){document.getElementById('cdv').textContent=this.value;});
 })();
+
+// collect ~4 seconds of readings then send
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('analyzebtn')
+    .addEventListener('click', () => startAnalysis('report'));
+
+  document.getElementById('canalyzebtn')
+    .addEventListener('click', () => startAnalysis('creport'));
+});
+
+function startAnalysis(targetId) {
+  if (targetId === 'report') {
+  document.getElementById('analyzebtn').textContent = 'Analyzing...';
+} else {
+  document.getElementById('canalyzebtn').textContent = 'Analyzing...';
+}
+  if (!audioOK) return;
+
+  const readings = { freq: [], amp: [], harm: [] };
+  let ticks = 0;
+
+  const sample = setInterval(() => {
+    AN.getByteFrequencyData(FA);
+    const sr = AX.sampleRate, fft = AN.fftSize;
+
+    let mx = -Infinity, idx = 1;
+    for (let i = 2; i < FA.length * 0.45; i++) {
+      if (FA[i] > mx) { mx = FA[i]; idx = i; }
+    }
+
+    const freq = idx * sr / fft;
+    const amp = Math.max(0, mx + 140);
+
+    let harm = 0;
+    const binSize = sr / fft;
+    for (let h = 2; h <= 8; h++) {
+      const b = Math.round(freq * h / binSize);
+      if (b < FA.length && FA[b] > 80) harm++;
+    }
+
+    readings.freq.push(freq);
+    readings.amp.push(amp);
+    readings.harm.push(harm);
+    ticks++;
+
+    if (ticks >= 40) {
+      clearInterval(sample);
+      sendToServer(readings, targetId);
+    }
+  }, 100);
+}
+
+function avg(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+
+async function sendToServer(readings,targetId) {
+  const dominantFreq = avg(readings.freq);
+  const amplitude    = avg(readings.amp);
+  const harmonicCount = Math.round(avg(readings.harm));
+  const pattern      = classify(dominantFreq, harmonicCount, amplitude);
+
+  try {
+    const res = await fetch('http://localhost:3001/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        dominantFreq: Math.round(dominantFreq),
+        harmonicCount,
+        amplitude: Math.round(amplitude),
+        pattern,
+        durationSecs: 4
+      })
+    });
+
+    const report = await res.json();
+    renderReport(report,targetId);
+  } catch (err) {
+    document.getElementById(targetId).innerHTML = '<p style="color:#ff6b6b">Server not reachable — is node server.js running?</p>';
+    document.getElementById(targetId).style.display = 'block';
+  }
+
+ if (targetId === 'report') {
+  document.getElementById('analyzebtn').textContent = '⬡ Analyze chant';
+} else {
+  document.getElementById('canalyzebtn').textContent = '⬡ Analyze chant';
+}
+}
+
+function renderReport(r,targetId) {
+  const el = document.getElementById(targetId);
+  el.style.display = 'block';
+  el.innerHTML = `
+    <div style="border:.5px solid rgba(160,140,255,0.3);border-radius:4px;padding:16px;margin-top:10px;font-size:11px;line-height:2;">
+      <div style="color:#a08cff;letter-spacing:.15em;text-transform:uppercase;font-size:10px;margin-bottom:12px;">
+        ◈ AI Chant Analysis
+      </div>
+      <div><span style="color:#55556a">Frequency</span> &nbsp;${r.frequency_name}</div>
+      <div><span style="color:#55556a">Nervous system</span> &nbsp;${r.nervous_system}</div>
+      <div><span style="color:#55556a">Brainwave</span> &nbsp;${r.brainwave}</div>
+      <div><span style="color:#55556a">Respiratory</span> &nbsp;${r.respiratory}</div>
+      <div><span style="color:#55556a">Resonance zones</span> &nbsp;${r.resonance_zones.join(', ')}</div>
+      <div><span style="color:#55556a">Caution</span> &nbsp;${r.caution}</div>
+      <div><span style="color:#55556a">Practice</span> &nbsp;${r.practice_suggestion}</div>
+    </div>`;
+}
 </script>
 </body>
 </html>
