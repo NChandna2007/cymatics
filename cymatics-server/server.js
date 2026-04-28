@@ -1,15 +1,22 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const path = require('path');        // ADD THIS
 const app = express();
-app.use(cors({
-  origin: ['http://localhost:5500', 'http://127.0.0.1:5500'] })); // your frontend's origin
-app.use(express.json());
 
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));  // ADD THIS — serves main.html
+
+// ADD THIS — keeps Render from sleeping
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
 
 if (!process.env.GROQ_API_KEY) {
   console.error("GROQ API KEY missing in .env");
 }
+
 app.post('/analyze', async (req, res) => {
   const { dominantFreq, harmonicCount, amplitude, pattern, durationSecs } = req.body;
 
@@ -37,50 +44,43 @@ Return this exact JSON shape:
 
   try {
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
-  },
-  body: JSON.stringify({
-    model: 'llama-3.1-8b-instant',
-    max_tokens: 800,
-    messages: [{ role: 'user', content: prompt }]
-  })
-});
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        max_tokens: 800,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
 
     const data = await response.json();
- console.log(" FULL API RESPONSE:", data);
+    console.log("FULL API RESPONSE:", data);
 
-    // ✅ VALIDATE RESPONSE
     if (!data.choices || !data.choices.length) {
-      console.error(" Invalid API response:", data);
+      console.error("Invalid API response:", data);
       throw new Error("Invalid API response");
     }
 
-    // ✅ EXTRACT MODEL OUTPUT
     let content = data.choices[0].message.content;
+    console.log("MODEL OUTPUT:", content);
 
-    console.log(" MODEL OUTPUT:", content);
-
-    //  CLEAN MARKDOWN (if present)
     content = content.replace(/```json|```/g, '').trim();
 
-    //  SAFE PARSE
     let report;
     try {
       report = JSON.parse(content);
     } catch (parseErr) {
-      console.error(" JSON PARSE FAILED. Raw content:", content);
+      console.error("JSON PARSE FAILED. Raw content:", content);
       throw new Error("Model did not return valid JSON");
     }
 
     res.json(report);
 
   } catch (err) {
-    // ✅ ADD THIS (YOU WERE MISSING THIS)
     console.error("ERROR IN /analyze:", err);
-
     res.status(500).json({
       error: 'Analysis failed',
       detail: err.message
@@ -88,6 +88,7 @@ Return this exact JSON shape:
   }
 });
 
-app.listen(process.env.PORT, () => {
-  console.log(`Server running on port ${process.env.PORT}`);
+const PORT = process.env.PORT || 3001;   // CHANGED — added fallback so local dev works
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
