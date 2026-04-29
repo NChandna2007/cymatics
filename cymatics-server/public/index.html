@@ -166,10 +166,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
   document.getElementById('page-'+b.dataset.tab).classList.add('active');
 }));
 
-/* ════════════════════════════════
-   LASER TRACE — logic from first file
-   Uses raw FFT data + harmonic decomposition + smoothed Lissajous XY
-════════════════════════════════ */
+
 (()=>{
   const canvas = document.getElementById('lc');
   const ctx    = canvas.getContext('2d');
@@ -208,7 +205,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     return map[col] || map.white;
   }
 
-  /* FFT helpers — identical to first file */
+  
   function getDominantFreq(freqData, sampleRate, fftSize) {
     let max = -Infinity, idx = 1;
     for (let i = 2; i < freqData.length * 0.45; i++) {
@@ -227,7 +224,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     return count;
   }
 
-  /* position computation — identical to first file */
+  /* position computation */
   function getPos(freqData, sampleRate, fftSize, sensitivity, scale) {
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
@@ -268,7 +265,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     };
   }
 
-  /* draw loop — identical to first file */
+  /* draw loop  */
   function drawFrame() {
     if (!run) return;
     requestAnimationFrame(drawFrame);
@@ -333,7 +330,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
     document.getElementById('lpat').textContent = classify(freq, harmonics, amp);
   }
 
-  /* clear util — identical to first file */
+  /* clear util */
   function clearAll() {
     trailCtx.clearRect(0, 0, trailCv.width, trailCv.height);
     ctx.fillStyle = 'rgba(8,8,16,1)';
@@ -367,7 +364,7 @@ document.querySelectorAll('.tab').forEach(b=>b.addEventListener('click',()=>{
 
 
 /* ════════════════════════════════
-   CHLADNI FIGURES — unchanged from second file
+   CHLADNI FIGURES 
    Z(x,y,m,n) = cos(m·π·x/W)·cos(n·π·y/H) + cos(n·π·x/W)·cos(m·π·y/H)
    Particles descend gradient of |Z| toward nodal lines (Z=0).
 ════════════════════════════════ */
